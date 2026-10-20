@@ -60,16 +60,16 @@ El firmware utiliza antirrebote por software, filtrado de mediciones y funciones
 | Cable USB compatible con Arduino:  1 |
 
 ## 4. Conexiones del circuito
-| Componente:  Pin Arduino |
-|----------------------|
-| Pulsador grave:  D2 |
-| Pulsador medio:  D3 |
-| Pulsador agudo:  D4 |
-| Buzzer pasivo:  D8 |
-| HC-SR04 TRIG:  D9 |
-| HC-SR04 ECHO:  D10 |
-| Alimentación del sensor:  5V |
-| Tierra del sensor:  GND |
+| Componente | Pin Arduino |
+|---|---|
+| Pulsador grave | D2 |
+| Pulsador medio | D3 |
+| Pulsador agudo | D4 |
+| Buzzer pasivo | D8 |
+| HC-SR04 TRIG | D9 |
+| HC-SR04 ECHO | D10 |
+| Alimentación del sensor | 5V |
+| Tierra del sensor | GND |
 
 Los pulsadores utilizan la configuración `INPUT_PULLUP`. Por lo tanto, cada botón debe conectar su pin digital a GND cuando se presiona.
 El buzzer debe ser pasivo para permitir generar diferentes frecuencias mediante `tone()`.
