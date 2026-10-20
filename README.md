@@ -49,15 +49,16 @@ El firmware utiliza antirrebote por software, filtrado de mediciones y funciones
 - Organizar el código y documentar el proyecto mediante GitHub.
 
 ## 3. Materiales
-| Componente: Cantidad |
-|------------------------|
-| Arduino UNO R3:  1 |
-| Sensor ultrasónico HC-SR04:  1 |
-| Pulsadores momentáneos:  3 |
-| Buzzer pasivo de 5 V:  1 |
-| Protoboard:  1 |
-| Cables de conexión:  Varios |
-| Cable USB compatible con Arduino:  1 |
+| Componente | Cantidad |
+|---|---:|
+| Arduino UNO R3 | 1 |
+| Sensor ultrasónico HC-SR04 | 1 |
+| Pulsadores momentáneos | 3 |
+| Buzzer pasivo de 5 V | 1 |
+| Protoboard | 1 |
+| Cables de conexión | Varios |
+| Cable USB compatible con Arduino | 1 |
+
 
 ## 4. Conexiones del circuito
 | Componente | Pin Arduino |
