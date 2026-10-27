@@ -1,6 +1,7 @@
 /**
  * Universidad de Valparaiso - Escuela de Ingenieria en Informatica
  * CIN-212 Hardware Digital - Tarea 2: Theremin Digital
+ * Version final corregida: filtro adaptativo, zona util estricta y diagnostico
  */
 
 // ==========================================
@@ -16,17 +17,17 @@ const uint8_t PIN_ECHO      = 10;
 // ==========================================
 // CONSTANTES DE CONFIGURACION
 // ==========================================
-const unsigned long TIEMPO_ANTIRREBOTE = 50;   // ms
-const unsigned long INTERVALO_SENSOR   = 50;   // Intervalo de medicion en ms
-const unsigned long TIMEOUT_ECHO       = 25000;// 25 ms (~4 metros max)
+const unsigned long TIEMPO_ANTIRREBOTE = 50;   // ms para debouncing
+const unsigned long INTERVALO_SENSOR   = 60;   // ms entre lecturas
+const unsigned long TIMEOUT_ECHO       = 18000;// ~3 metros max para evitar bloqueos
 
-// Rango de deteccion util (cm)
+// Zona util segun pauta (5.0 a 30.0 cm)
 const float DIST_MIN_CM = 5.0;
 const float DIST_MAX_CM = 30.0;
 
-// Rangos de frecuencia sugeridos (Hz)
+// Rangos de frecuencia (Hz)
 enum RangoTonal { GRAVE, MEDIO, AGUDO };
-RangoTonal rangoActivo = MEDIO; // Por defecto rango medio
+RangoTonal rangoActivo = MEDIO; // Rango inicial por defecto
 
 const unsigned int FREQ_GRAVE_MIN = 131; // Do3
 const unsigned int FREQ_GRAVE_MAX = 262; // Do4
@@ -39,17 +40,16 @@ const unsigned int FREQ_AGUDO_MAX = 1047;// Do6
 const uint8_t VENTANA_FILTRO = 5;
 float historialDistancias[VENTANA_FILTRO];
 uint8_t indiceFiltro = 0;
-bool filtroLleno = false;
+uint8_t muestrasValidas = 0;
 
-// Variables temporales
 unsigned long ultimoTiempoSensor = 0;
 
-// Estructura para control de pulsadores
+// Estructura de pulsadores
 struct Boton {
   uint8_t pin;
-  int ultimoEstadoLectura;
+  int estadoAnterior;
   int estadoEstable;
-  unsigned long ultimoTiempoCambio;
+  unsigned long ultimoTiempoRebote;
 };
 
 Boton botones[3] = {
@@ -62,35 +62,40 @@ Boton botones[3] = {
 // DECLARACION DE FUNCIONES
 // ==========================================
 void inicializarPines();
-void actualizarPulsadores();
+void leerPulsadores();
 float medirDistanciaCM();
-float aplicarFiltro(float nuevaDistancia);
-void procesarAudio(float distancia);
+float filtrarDistancia(float nuevaLectura);
+void reiniciarFiltro();
+void actualizarAudio(float distancia);
 
 // ==========================================
-// SETUP Y LOOP PRINCIPAL
+// SETUP Y LOOP
 // ==========================================
 void setup() {
   Serial.begin(9600);
   inicializarPines();
+  Serial.println(F("--- Theremin Digital Listo ---"));
+  Serial.println(F("Rango activo por defecto: MEDIO"));
 }
 
 void loop() {
-  actualizarPulsadores();
+  // 1. Monitoreo constante de pulsadores sin bloqueo
+  leerPulsadores();
 
+  // 2. Temporizacion del sensor con millis()
   unsigned long tiempoActual = millis();
   if (tiempoActual - ultimoTiempoSensor >= INTERVALO_SENSOR) {
     ultimoTiempoSensor = tiempoActual;
-    
-    float distanciaCruda = medirDistanciaCM();
-    float distanciaFiltrada = aplicarFiltro(distanciaCruda);
 
-    procesarAudio(distanciaFiltrada);
+    float distanciaCruda = medirDistanciaCM();
+    float distanciaFiltrada = filtrarDistancia(distanciaCruda);
+
+    actualizarAudio(distanciaFiltrada);
   }
 }
 
 // ==========================================
-// IMPLEMENTACION DE MODULOS
+// FUNCIONES MODULARES
 // ==========================================
 
 void inicializarPines() {
@@ -104,81 +109,113 @@ void inicializarPines() {
 
   pinMode(PIN_BUZZER, OUTPUT);
   noTone(PIN_BUZZER);
+  reiniciarFiltro();
 }
 
-void actualizarPulsadores() {
-  for (int i = 0; i < 3; i++) {
+void leerPulsadores() {
+  for (uint8_t i = 0; i < 3; i++) {
     int lectura = digitalRead(botones[i].pin);
 
-    if (lectura != botones[i].ultimoEstadoLectura) {
-      botones[i].ultimoTiempoCambio = millis();
+    // Deteccion de cambio de estado
+    if (lectura != botones[i].estadoAnterior) {
+      botones[i].ultimoTiempoRebote = millis();
     }
 
-    if ((millis() - botones[i].ultimoTiempoCambio) > TIEMPO_ANTIRREBOTE) {
+    // Filtrado antirrebote temporal
+    if ((millis() - botones[i].ultimoTiempoRebote) > TIEMPO_ANTIRREBOTE) {
       if (lectura != botones[i].estadoEstable) {
         botones[i].estadoEstable = lectura;
 
         // Flanco de bajada (al presionar hacia GND)
         if (botones[i].estadoEstable == LOW) {
-          if (i == 0) rangoActivo = GRAVE;
-          else if (i == 1) rangoActivo = MEDIO;
-          else if (i == 2) rangoActivo = AGUDO;
+          if (i == 0) {
+            rangoActivo = GRAVE;
+            Serial.println(F("[BOTON] Cambiado a rango: GRAVE"));
+          } else if (i == 1) {
+            rangoActivo = MEDIO;
+            Serial.println(F("[BOTON] Cambiado a rango: MEDIO"));
+          } else if (i == 2) {
+            rangoActivo = AGUDO;
+            Serial.println(F("[BOTON] Cambiado a rango: AGUDO"));
+          }
         }
       }
     }
-    botones[i].ultimoEstadoLectura = lectura;
+    botones[i].estadoAnterior = lectura;
   }
 }
 
 float medirDistanciaCM() {
-  // Disparo del sensor
+  // Disparo limpio del pulso ultrasonico
   digitalWrite(PIN_TRIG, LOW);
-  delayMicroseconds(2);
+  delayMicroseconds(4);
   digitalWrite(PIN_TRIG, HIGH);
   delayMicroseconds(10);
   digitalWrite(PIN_TRIG, LOW);
 
-  // Lectura del eco con timeout no bloqueante
+  // Lectura del eco con timeout
   unsigned long duracion = pulseIn(PIN_ECHO, HIGH, TIMEOUT_ECHO);
 
+  // Si no hay eco (duracion == 0), no hay objeto
   if (duracion == 0) {
-    return -1.0; // Fuera de rango o lectura invalida
-  }
-
-  // d = (t * 0.0343) / 2 = t / 58.3
-  return (float)duracion / 58.2;
-}
-
-float aplicarFiltro(float nuevaDistancia) {
-  // Si la medicion es invalida, mantener el ultimo estado
-  if (nuevaDistancia < 0) {
     return -1.0;
   }
 
-  historialDistancias[indiceFiltro] = nuevaDistancia;
-  indiceFiltro = (indiceFiltro + 1) % VENTANA_FILTRO;
+  // d = (t * 0.0343) / 2 = t / 58.2
+  float cm = (float)duracion / 58.2;
 
-  if (indiceFiltro == 0) {
-    filtroLleno = true;
+  // Filtrado de lecturas anomalas fuera de rango fisico
+  if (cm < 4.0 || cm > 35.0) {
+    return -1.0;
   }
 
-  uint8_t cantidad = filtroLleno ? VENTANA_FILTRO : indiceFiltro;
+  return cm;
+}
+
+void reiniciarFiltro() {
+  for (uint8_t i = 0; i < VENTANA_FILTRO; i++) {
+    historialDistancias[i] = 0.0;
+  }
+  indiceFiltro = 0;
+  muestrasValidas = 0;
+}
+
+float filtrarDistancia(float nuevaLectura) {
+  // Si la lectura es invalida o no hay mano, se vacia el filtro
+  if (nuevaLectura < 0.0) {
+    reiniciarFiltro();
+    return -1.0;
+  }
+
+  historialDistancias[indiceFiltro] = nuevaLectura;
+  indiceFiltro = (indiceFiltro + 1) % VENTANA_FILTRO;
+  if (muestrasValidas < VENTANA_FILTRO) {
+    muestrasValidas++;
+  }
+
   float suma = 0.0;
-  for (uint8_t i = 0; i < cantidad; i++) {
+  for (uint8_t i = 0; i < muestrasValidas; i++) {
     suma += historialDistancias[i];
   }
 
-  return suma / cantidad;
+  return suma / muestrasValidas;
 }
 
-void procesarAudio(float distancia) {
-  // Verificar si se encuentra dentro de la zona util
+void actualizarAudio(float distancia) {
+  // Diagnostico visual en tiempo real
+  if (distancia > 0) {
+    Serial.print(F("Distancia: "));
+    Serial.print(distancia);
+    Serial.println(F(" cm"));
+  }
+
+  // REGLA FUNDAMENTAL: Si no hay lectura valida o esta fuera de la zona util -> SILENCIO
   if (distancia < DIST_MIN_CM || distancia > DIST_MAX_CM) {
     noTone(PIN_BUZZER);
     return;
   }
 
-  // Constrain de seguridad
+  // Limites de saturacion
   float distSegura = constrain(distancia, DIST_MIN_CM, DIST_MAX_CM);
 
   unsigned int fMin = FREQ_MEDIO_MIN;
@@ -199,10 +236,10 @@ void procesarAudio(float distancia) {
       break;
   }
 
-  // Mapeo inverso: A menor distancia -> frecuencia mas aguda (fMax)
-  long frecuencia = map((long)(distSegura * 10), 
-                        (long)(DIST_MIN_CM * 10), (long)(DIST_MAX_CM * 10), 
-                        fMax, fMin);
+  // Mapeo inverso: A menor distancia -> tono mas agudo
+  long freq = map((long)(distSegura * 10), 
+                  (long)(DIST_MIN_CM * 10), (long)(DIST_MAX_CM * 10), 
+                  fMax, fMin);
 
-  tone(PIN_BUZZER, (unsigned int)frecuencia);
+  tone(PIN_BUZZER, (unsigned int)freq);
 }
